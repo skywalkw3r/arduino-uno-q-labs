@@ -33,7 +33,24 @@ This app has four parts, so App Lab's copy/paste flow needs all of them:
     - arduino:web_ui
   ```
 
-Then Run, and open the app's web UI from App Lab.
+## Opening it
+
+The `web_ui` brick serves on **port 7000**, published on all interfaces:
+
+```
+http://<board-ip>:7000
+```
+
+So from any machine on the same network, e.g. `http://192.168.1.42:7000`. On the
+board itself, `http://localhost:7000`. App Lab also has a button to open it.
+
+Confirm it's up without a browser:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://<board-ip>:7000/
+```
+
+`200` means the page is being served and the problem is elsewhere.
 
 ## What you should see
 
@@ -77,6 +94,9 @@ ui.expose_api(method="POST", path="/my_endpoint", function=handler)
 
 ## If it fails
 
+- **Browser can't connect at all** — check the port is 7000, and that the app is
+  actually running (`./scripts/app.sh status`). The container publishes
+  `0.0.0.0:7000->7000/tcp`; verify with `docker ps` on the board.
 - **Page loads but stays "disconnected"** — `libs/` is missing. Run
   `fetch-webui-libs.sh`.
 - **`WebUI is not defined` in the browser console** — same cause; `arduino.js`

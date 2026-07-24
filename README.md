@@ -29,7 +29,7 @@ different failure, so the first one that fails tells you where the problem is.
 | [`03-gpio-walk`](apps/03-gpio-walk) | every digital header pin drives a load | LED + 220 Ω (optional) |
 | [`04-analog-scan`](apps/04-analog-scan) | 14-bit ADC on A0–A5 | 10 kΩ pot (optional) |
 | [`05-i2c-scan`](apps/05-i2c-scan) | both I²C buses, incl. the Qwiic connector | any I²C/Qwiic device |
-| [`06-web-dashboard`](apps/06-web-dashboard) | the `web_ui` brick, live telemetry in a browser | none |
+| [`06-web-dashboard`](apps/06-web-dashboard) | the `web_ui` brick, live telemetry at `http://<board-ip>:7000` | none |
 | [`07-camera-objects`](apps/07-camera-objects) | camera + on-device object detection | USB camera |
 
 Plus [`tests/run_checks.py`](tests/run_checks.py) — 19 stdlib-only checks you
