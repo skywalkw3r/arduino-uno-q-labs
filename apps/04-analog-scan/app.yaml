@@ -1,0 +1,3 @@
+name: 04 Analog Scan
+icon: 📈
+description: Streams all six analog inputs at 14-bit resolution to Python, converts to volts, and reports min/mean/max plus a live bar for A0. Verifies the ADC and shows what a floating input looks like.

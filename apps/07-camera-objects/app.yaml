@@ -1,0 +1,6 @@
+name: 07 Camera Objects
+icon: 👁️
+description: On-device object detection over a live camera feed using the video_object_detection brick. Logs detections with confidence and reports the achieved frame rate. Requires a camera.
+
+bricks:
+  - arduino:video_object_detection

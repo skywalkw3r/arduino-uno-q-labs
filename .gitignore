@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Vendored web UI libs — fetched by scripts/fetch-webui-libs.sh, not committed
+apps/*/assets/libs/socket.io.min.js
+apps/*/assets/libs/arduino.js
+
+# Build output from arduino-cli / App Lab
+build/
+*.elf
+*.bin
+*.hex
+
+# Captured bring-up reports
+reports/
+*.log
+
+# macOS
+.DS_Store

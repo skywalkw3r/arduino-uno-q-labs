@@ -1,0 +1,3 @@
+name: 01 Blink MCU
+icon: 🔴
+description: MCU-side smoke test. Blinks LED_BUILTIN and cycles LED 3 through red/green/blue entirely from the sketch. Proves the sketch compiles, flashes, and runs on the STM32. No wiring.

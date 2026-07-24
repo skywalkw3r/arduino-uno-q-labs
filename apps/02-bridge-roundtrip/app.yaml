@@ -1,0 +1,3 @@
+name: 02 Bridge Roundtrip
+icon: 🔁
+description: Measures Python to MCU and back RPC latency over the Bridge, reporting min/mean/p95/max every 20 samples. Establishes what "normal" looks like on your board. No wiring.

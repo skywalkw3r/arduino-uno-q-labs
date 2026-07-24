@@ -1,0 +1,3 @@
+name: 03 GPIO Walk
+icon: 🚦
+description: Walks a HIGH pulse across digital pins D2-D13 one at a time, driven from Python over the Bridge. Verifies every header output pin with an LED or a probe.

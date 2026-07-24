@@ -1,0 +1,3 @@
+name: 00 Hello MPU
+icon: 🐧
+description: Linux-side smoke test. Prints a board inventory (CPU, memory, storage, thermals, network, router status) and cycles the two MPU-controlled RGB LEDs. No sketch, no wiring.

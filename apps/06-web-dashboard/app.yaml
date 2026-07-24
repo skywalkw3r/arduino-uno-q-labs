@@ -1,0 +1,6 @@
+name: 06 Web Dashboard
+icon: 📊
+description: Live browser dashboard using the web_ui brick. Streams A0 readings from the MCU into a rolling chart and lets you toggle the onboard LED from the page. Demonstrates both directions over WebSocket.
+
+bricks:
+  - arduino:web_ui

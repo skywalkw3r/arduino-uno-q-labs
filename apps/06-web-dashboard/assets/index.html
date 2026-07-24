@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UNO Q — Live Dashboard</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>UNO Q live telemetry</h1>
+        <span id="status" class="status status--down">disconnected</span>
+      </header>
+
+      <section class="readout">
+        <div class="stat">
+          <span class="stat__label">A0</span>
+          <span class="stat__value" id="volts">—</span>
+          <span class="stat__unit">V</span>
+        </div>
+        <div class="stat stat--secondary">
+          <span class="stat__label">raw</span>
+          <span class="stat__value" id="raw">—</span>
+          <span class="stat__unit">counts</span>
+        </div>
+        <div class="stat stat--secondary">
+          <span class="stat__label">samples</span>
+          <span class="stat__value" id="samples">—</span>
+          <span class="stat__unit">from MCU</span>
+        </div>
+      </section>
+
+      <canvas id="chart" width="800" height="240" aria-label="A0 voltage over time"></canvas>
+
+      <section class="controls">
+        <button id="led-button" type="button">Toggle onboard LED</button>
+        <span id="led-state" class="led-state">LED off</span>
+      </section>
+
+      <footer>
+        <p>
+          Data path: sketch (STM32) → Bridge → Python (QRB2210) → WebSocket → this page.
+        </p>
+      </footer>
+    </main>
+
+    <script src="libs/socket.io.min.js"></script>
+    <script src="libs/arduino.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

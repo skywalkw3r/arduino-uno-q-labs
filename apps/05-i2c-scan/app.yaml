@@ -1,0 +1,3 @@
+name: 05 I2C Scan
+icon: 🔍
+description: Scans both I2C buses - the D20/D21 header bus (Wire) and the Qwiic connector (Wire1) - and reports every address found, with likely device names. The fastest way to tell "wrong bus" from "not working".
