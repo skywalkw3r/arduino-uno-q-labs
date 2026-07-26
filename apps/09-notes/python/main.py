@@ -22,9 +22,11 @@ and no races — the same flag/queue pattern the bring-up apps use for the Bridg
 """
 
 import hmac
+import json
 import logging
 import os
 import queue
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -213,13 +215,30 @@ except Exception as exc:
 
 # Migration: track which notes have been pushed to Notion. The ALTER fails once
 # the column exists, which is expected on every run after the first.
-try:
-    db.execute_sql("ALTER TABLE notes ADD COLUMN synced INTEGER DEFAULT 0")
-    logger.info("added notes.synced column")
-except Exception:
-    pass
+for _column, _ddl in (
+    ("synced", "ALTER TABLE notes ADD COLUMN synced INTEGER DEFAULT 0"),
+    ("entities", "ALTER TABLE notes ADD COLUMN entities TEXT DEFAULT ''"),
+):
+    try:
+        db.execute_sql(_ddl)
+        logger.info("added notes.%s column", _column)
+    except Exception:
+        pass  # column already exists
 
-COLUMNS = ["id", "created", "raw", "ai", "synced"]
+COLUMNS = ["id", "created", "raw", "ai", "synced", "entities"]
+
+
+def row_to_dict(row) -> dict:
+    """Normalise a stored row to a dict, parsing the entities JSON to a list."""
+    if isinstance(row, dict):
+        d = {k: row.get(k) for k in COLUMNS}
+    else:
+        d = {k: v for k, v in zip(COLUMNS, row)}
+    try:
+        d["entities"] = json.loads(d.get("entities") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        d["entities"] = []
+    return d
 
 
 def get_setting(key: str, default=None):
@@ -241,17 +260,6 @@ def set_setting(key: str, value) -> None:
         logger.warning("set_setting(%s) failed: %s", key, exc)
 
 
-def row_to_dict(row) -> dict:
-    """Normalise a stored row to a dict.
-
-    SQLStore.read() may return dicts or plain tuples depending on the brick
-    version, so handle both rather than assuming one.
-    """
-    if isinstance(row, dict):
-        return {k: row.get(k) for k in COLUMNS}
-    return {k: v for k, v in zip(COLUMNS, row)}
-
-
 def all_notes(limit: int = 100) -> list[dict]:
     try:
         rows = db.read("notes", order_by="id DESC", limit=limit) or []
@@ -268,6 +276,8 @@ def all_notes(limit: int = 100) -> list[dict]:
 _sync_enabled = get_setting("sync_enabled", "0") == "1"
 _sync_interval = int(get_setting("sync_interval", "10") or 10)
 _item_type = get_setting("item_type", "note")  # "note" or "reminder"
+# External place lookups are OFF by default — they send a query off-device.
+_enrich_enabled = get_setting("enrich_enabled", "0") == "1"
 
 
 def pending_note_count() -> int:
@@ -288,6 +298,8 @@ def sync_settings() -> dict:
         "pending": pending_note_count(),
         "last_sync": get_setting("last_sync", ""),
         "last_result": get_setting("last_result", ""),
+        "enrich_enabled": _enrich_enabled,
+        "enrich_available": extractor is not None,
     }
 
 
@@ -364,6 +376,147 @@ def summarise(raw: str) -> tuple[str, bool]:
         # Most common cause: the model is registered but not downloaded yet.
         logger.warning("summary failed (%s)", exc)
         return "", False
+
+
+# --------------------------------------------------------- entity detection ---
+#
+# Two-part detection: rules for format-bearing entities (whose match IS the
+# fact) and a GROUNDED LLM pass for named places/people. The LLM only spots
+# names — it never invents facts, because every name it returns is kept only if
+# it appears verbatim in the note. That grounding is the anti-hallucination gate.
+
+_URL_RE = re.compile(r"https?://[^\s]+")
+_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
+_PHONE_RE = re.compile(r"(?<!\w)(\+?\d[\d\s().-]{6,}\d)(?!\w)")
+
+# Give the small model ONE job — list place names — rather than a structured
+# format it can't follow reliably. Everything else is filtered in code.
+EXTRACT_SYSTEM = (
+    "List the places, businesses, restaurants, shops, or venues mentioned in the "
+    "note. Put each on its own line, copied exactly as written in the note. Do not "
+    "list people, dates, tasks, or anything else. If there are none, reply: none"
+)
+
+# Words the model often mislabels as places; dropped even if capitalised.
+_DATE_WORDS = {
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "today", "tomorrow", "yesterday", "tonight", "morning", "afternoon", "evening",
+    "night", "week", "weekend", "month", "year",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+}
+
+
+def make_extractor():
+    """A second LLM client with an extraction system prompt. It shares the same
+    underlying model/runner as the summariser, so no extra model is loaded."""
+    if not _HAVE_LLM_BRICK or llm is None:
+        return None
+    try:
+        return LargeLanguageModel(system_prompt=EXTRACT_SYSTEM)
+    except Exception as exc:
+        logger.warning("entity extractor unavailable (%s)", exc)
+        return None
+
+
+extractor = make_extractor()
+
+
+# Capitalised word runs in the NOTE — clean, correctly-cased proper-noun
+# candidates. We trust the note's own casing, never the model's.
+_PROPER_RE = re.compile(r"[A-Z][\w'&.\-]*(?:\s+[A-Z][\w'&.\-]*)*")
+
+
+def _llm_place_hint(text: str) -> str:
+    """The model's (noisy, possibly mis-cased) place list, lowercased for
+    matching. Used only to CONFIRM candidates, never as the name itself."""
+    if extractor is None:
+        return ""
+    try:
+        return extractor.chat(f"Note: {text}").lower()
+    except Exception as exc:
+        logger.warning("place extraction failed (%s)", exc)
+        return ""
+
+
+def detect_places(text: str) -> list:
+    """Proper nouns from the note that the model confirms are places."""
+    hint = _llm_place_hint(text).strip()
+    if not hint or hint == "none":
+        return []
+    places = []
+    for m in _PROPER_RE.finditer(text):
+        name = m.group().strip(" .,:;-")
+        low = name.lower()
+        if not name or low in _DATE_WORDS or len(name.split()) > 5:
+            continue
+        # Keep it only if the model's place list mentions it — the note supplies
+        # the clean name, the model supplies the "yes, that's a place" signal.
+        if low in hint and name not in places:
+            places.append(name)
+    return places[:6]
+
+
+def detect_entities(text: str) -> list:
+    """Return a de-duplicated list of {type, text, enrichable} for a note."""
+    found: list = []
+    seen: set = set()
+
+    def add(typ: str, value: str, enrichable: bool = False):
+        value = value.strip()
+        key = (typ, value.lower())
+        if value and key not in seen:
+            seen.add(key)
+            found.append({"type": typ, "text": value, "enrichable": enrichable})
+
+    # Rules first — deterministic, and the match itself is the fact.
+    for m in _EMAIL_RE.findall(text):
+        add("email", m)
+    for m in _URL_RE.findall(text):
+        add("url", m)
+    for m in _PHONE_RE.findall(text):
+        if 7 <= len(re.sub(r"\D", "", m)) <= 15:
+            add("phone", m.strip())
+
+    # Places — the only enrichable type (people/dates aren't looked up).
+    for name in detect_places(text):
+        add("place", name, enrichable=True)
+
+    return found
+
+
+# --------------------------------------------------------------- enrichment ---
+#
+# External lookup for place entities. OFF by default; only fires on an explicit
+# user tap. Only the query string leaves the device — never the note body.
+# OpenStreetMap Nominatim: free, no key. Address is reliable; phone is present
+# only when the place is tagged with one.
+
+def nominatim_lookup(query: str) -> list:
+    import urllib.parse
+    import urllib.request
+
+    url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode({
+        "q": query, "format": "jsonv2", "addressdetails": 1, "extratags": 1, "limit": 3,
+    })
+    # Nominatim requires an identifying User-Agent.
+    req = urllib.request.Request(url, headers={"User-Agent": "arduino-uno-q-notes/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as exc:
+        logger.warning("nominatim lookup failed (%s)", exc)
+        return []
+    results = []
+    for r in data:
+        tags = r.get("extratags") or {}
+        results.append({
+            "name": (r.get("display_name") or "").split(",")[0],
+            "address": r.get("display_name") or "",
+            "phone": tags.get("phone") or tags.get("contact:phone") or "",
+            "website": tags.get("website") or tags.get("contact:website") or "",
+        })
+    return results
 
 
 # --------------------------------------------------------------- web UI ---
@@ -460,7 +613,7 @@ def on_get_settings(sid: str, data) -> None:
 
 
 def on_set_settings(sid: str, data) -> None:
-    global _sync_enabled, _sync_interval, _item_type
+    global _sync_enabled, _sync_interval, _item_type, _enrich_enabled
     if not _guard(sid):
         return
     data = data or {}
@@ -478,6 +631,9 @@ def on_set_settings(sid: str, data) -> None:
     if data.get("item_type") in ("note", "reminder"):
         _item_type = data["item_type"]
         set_setting("item_type", _item_type)
+    if "enrich_enabled" in data:
+        _enrich_enabled = bool(data["enrich_enabled"])
+        set_setting("enrich_enabled", "1" if _enrich_enabled else "0")
     broadcast_settings()
 
 
@@ -485,6 +641,15 @@ def on_sync_now(sid: str, data) -> None:
     if not _guard(sid):
         return
     pending.put({"op": "sync_now"})  # run in loop() to keep the DB single-owner
+
+
+def on_enrich(sid: str, data) -> None:
+    if not _guard(sid):
+        return
+    query = (data or {}).get("query", "").strip()
+    if query:
+        # Run the lookup in loop() (network off the socket thread); reply to sid.
+        pending.put({"op": "enrich", "sid": sid, "query": query})
 
 
 ui.on_connect(on_connect)
@@ -496,6 +661,7 @@ ui.on_message("delete_note", on_delete_note)
 ui.on_message("get_settings", on_get_settings)
 ui.on_message("set_settings", on_set_settings)
 ui.on_message("sync_now", on_sync_now)
+ui.on_message("enrich", on_enrich)
 
 
 def _payload() -> dict:
@@ -530,29 +696,37 @@ def broadcast_settings() -> None:
 
 def do_add(text: str) -> None:
     ai_text, ok = summarise(text)
+    entities = detect_entities(text)
     db.store(
         "notes",
         {
             "created": datetime.now().isoformat(timespec="seconds"),
             "raw": text,
             "ai": ai_text if ok else NO_MODEL_PLACEHOLDER,
+            "entities": json.dumps(entities),
         },
     )
-    logger.info("added note (%d chars, ai=%s)", len(text), ok)
+    logger.info("added note (%d chars, ai=%s, %d entities)", len(text), ok, len(entities))
 
 
 def do_edit(note_id, text: str) -> None:
-    # Editing the text invalidates the old summary, so re-summarise.
+    # Editing the text invalidates the old summary and entities, so redo both.
     ai_text, ok = summarise(text)
+    entities = detect_entities(text)
     # int() makes the WHERE clause injection-proof: a non-integer id raises here
     # rather than reaching the database.
     db.update(
         "notes",
         # synced=0 so the edited note re-syncs to Notion.
-        {"raw": text, "ai": ai_text if ok else NO_MODEL_PLACEHOLDER, "synced": 0},
+        {
+            "raw": text,
+            "ai": ai_text if ok else NO_MODEL_PLACEHOLDER,
+            "synced": 0,
+            "entities": json.dumps(entities),
+        },
         f"id = {int(note_id)}",
     )
-    logger.info("edited note id=%d (ai=%s)", int(note_id), ok)
+    logger.info("edited note id=%d (ai=%s, %d entities)", int(note_id), ok, len(entities))
 
 
 def do_delete(note_id) -> None:
@@ -564,11 +738,19 @@ def do_sync_now() -> None:
     sync_to_notion("manual")
 
 
+def do_enrich(sid: str, query: str) -> None:
+    if not _enrich_enabled:
+        ui.send_message("enrich_result", {"query": query, "disabled": True}, room=sid)
+        return
+    ui.send_message("enrich_result", {"query": query, "results": nominatim_lookup(query)}, room=sid)
+
+
 OPS = {
     "add": lambda o: do_add(o["text"]),
     "edit": lambda o: do_edit(o["id"], o["text"]),
     "delete": lambda o: do_delete(o["id"]),
     "sync_now": lambda o: do_sync_now(),
+    "enrich": lambda o: do_enrich(o["sid"], o["query"]),
 }
 
 
@@ -627,8 +809,11 @@ def loop() -> None:
     except Exception as exc:
         logger.error("op %r failed: %s", op.get("op"), exc)
 
-    broadcast_notes()
-    broadcast_settings()
+    # An enrich lookup already replied to the one requesting client; broadcasting
+    # the note list would wipe inline results, so skip it for enrich.
+    if op.get("op") != "enrich":
+        broadcast_notes()
+        broadcast_settings()
 
 
 scheme = "https" if USE_TLS else "http"

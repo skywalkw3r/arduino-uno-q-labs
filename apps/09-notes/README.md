@@ -100,6 +100,23 @@ your database — only the **title property** is set, so it works with *any*
 database schema (the app auto-detects the title property's name). A ✓ Notion
 badge marks synced notes; editing a note re-syncs it.
 
+## Context detection & place lookups
+
+Notes are scanned for entities and shown as chips: phones/emails/URLs (regex) and
+**places** (a proper-noun scan of your note, confirmed by the local LLM). The
+name always comes from your note's own text — the model only says "yes, that's a
+place" — so it's robust to a small model's noisy output.
+
+Tap a 📍 place chip to look up its **address and phone** via OpenStreetMap
+(Nominatim). This is **off by default** and per-tap: only that place name leaves
+the device (never the note), and only when you tap. Turn it on under **⚙ →
+Context lookups**. Address is reliable; phone is present only when OSM has it.
+
+Design note: the local 0.8B model must never *produce* a fact — it would
+hallucinate addresses. So facts come from the lookup API; the model is used only
+for language (spotting that a place is mentioned). See the multi-agent design
+exploration that shaped this.
+
 ## How it works
 
 - **`web_ui`** serves the page and carries messages over a WebSocket. The

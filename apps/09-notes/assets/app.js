@@ -87,6 +87,10 @@ const syncInterval = document.querySelector('#sync-interval');
 const syncType = document.querySelector('#sync-type');
 const syncNowBtn = document.querySelector('#sync-now-btn');
 const syncStatus = document.querySelector('#sync-status');
+const enrichToggle = document.querySelector('#enrich-toggle');
+
+let enrichEnabled = false;              // are external place lookups allowed?
+const enrichTargets = {};               // query -> result container element
 
 settingsBtn.addEventListener('click', () => {
   const opening = settingsPanel.hidden;
@@ -115,6 +119,10 @@ function renderSettings(s) {
   if (s.last_sync) bits.push(`last ${new Date(s.last_sync).toLocaleTimeString()}`);
   if (s.last_result) bits.push(s.last_result);
   syncStatus.textContent = bits.join(' · ');
+
+  enrichEnabled = !!s.enrich_enabled;
+  enrichToggle.checked = enrichEnabled;
+  enrichToggle.disabled = !s.enrich_available; // no model = nothing to detect
 }
 
 function pushSettings() {
@@ -122,12 +130,83 @@ function pushSettings() {
     enabled: syncToggle.checked,
     interval: parseInt(syncInterval.value, 10),
     item_type: syncType.value,
+    enrich_enabled: enrichToggle.checked,
   });
 }
 syncToggle.addEventListener('change', pushSettings);
 syncInterval.addEventListener('change', pushSettings);
 syncType.addEventListener('change', pushSettings);
+enrichToggle.addEventListener('change', pushSettings);
 syncNowBtn.addEventListener('click', () => ui.send_message('sync_now'));
+
+// --- entity chips + place lookup -----------------------------------------
+const ENTITY_ICON = { place: '📍', person: '👤', phone: '📞', email: '✉️', url: '🔗' };
+
+function entityChips(note) {
+  const ents = note.entities || [];
+  if (!ents.length) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'note__entities';
+  for (const e of ents) {
+    const chip = document.createElement('span');
+    chip.className = 'chip chip--' + e.type + (e.enrichable ? ' chip--enrichable' : '');
+    chip.textContent = `${ENTITY_ICON[e.type] || '•'} ${e.text}`;
+    if (e.enrichable) {
+      chip.title = 'Look up address & phone (OpenStreetMap)';
+      chip.addEventListener('click', () => lookUp(e.text, wrap));
+    }
+    wrap.appendChild(chip);
+  }
+  return wrap;
+}
+
+function lookUp(query, wrap) {
+  let box = wrap.querySelector(`.enrich-result[data-q="${cssEscape(query)}"]`);
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'enrich-result';
+    box.dataset.q = query;
+    wrap.appendChild(box);
+  }
+  if (!enrichEnabled) {
+    box.textContent = 'Place lookups are off — turn on “Look up places” in ⚙ settings.';
+    return;
+  }
+  box.textContent = `Looking up “${query}” on OpenStreetMap…`;
+  enrichTargets[query] = box;
+  ui.send_message('enrich', { query });
+}
+
+ui.on_message('enrich_result', (data) => {
+  const box = enrichTargets[data.query];
+  if (!box) return;
+  if (data.disabled) {
+    box.textContent = 'Place lookups are off.';
+    return;
+  }
+  const results = data.results || [];
+  if (!results.length) {
+    box.textContent = `No match found for “${data.query}”.`;
+    return;
+  }
+  const r = results[0]; // best match
+  box.innerHTML = '';
+  const line = document.createElement('div');
+  const parts = [];
+  if (r.address) parts.push(r.address);
+  if (r.phone) parts.push('📞 ' + r.phone);
+  if (r.website) parts.push('🔗 ' + r.website);
+  line.textContent = parts.join('  ·  ');
+  box.appendChild(line);
+  const src = document.createElement('span');
+  src.className = 'enrich-src';
+  src.textContent = 'via OpenStreetMap' + (r.phone ? '' : ' · no phone listed');
+  box.appendChild(src);
+});
+
+function cssEscape(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&');
+}
 
 saveBtn.addEventListener('click', save);
 inputEl.addEventListener('keydown', (e) => {
@@ -195,6 +274,9 @@ function noteCard(note) {
   } else if (aiText) {
     li.appendChild(aiBlock(aiText, false));
   }
+
+  const chips = entityChips(note);
+  if (chips) li.appendChild(chips);
 
   // Edit/Delete only on real, stored notes — an optimistic card has no id yet.
   if (!note.pending && note.id != null) {

@@ -61,6 +61,18 @@
           <button id="sync-now-btn" class="btn-small" type="button">Sync now</button>
           <span id="sync-status" class="settings__meta"></span>
         </div>
+
+        <hr class="settings__sep" />
+        <h2>Context lookups</h2>
+        <label class="settings__row">
+          <span>Look up places (OpenStreetMap)</span>
+          <input type="checkbox" id="enrich-toggle" />
+        </label>
+        <p class="settings__hint">
+          When on, tapping a 📍 place chip on a note sends only that name to
+          OpenStreetMap to fetch an address and phone. Your note never leaves the
+          device. Off = places are just highlighted, nothing is sent.
+        </p>
       </section>
 
       <section class="composer">
