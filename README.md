@@ -32,7 +32,10 @@ different failure, so the first one that fails tells you where the problem is.
 | [`06-web-dashboard`](apps/06-web-dashboard) | the `web_ui` brick, live telemetry at `http://<board-ip>:7000` | none |
 | [`07-camera-objects`](apps/07-camera-objects) | camera + on-device object detection | USB camera |
 | [`08-llm-bench`](apps/08-llm-bench) | local LLM speed (load, TTFT, tok/s) on the QRB2210 | model download (GUI) |
-| [`09-notes`](apps/09-notes) | **the payoff app** — local AI note-taking (web UI + LLM + SQLite) | model download (GUI) |
+
+> The note-taking app that grew out of this repo (was `09-notes`) is now its own
+> project, **Mutter** — local AI notes with two-way Notion sync. It lives in a
+> separate repo.
 
 Plus [`tests/run_checks.py`](tests/run_checks.py) — 19 stdlib-only checks you
 run **on the board** to assert the OS-level things (router service, serial
