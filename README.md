@@ -31,6 +31,7 @@ different failure, so the first one that fails tells you where the problem is.
 | [`05-i2c-scan`](apps/05-i2c-scan) | both I²C buses, incl. the Qwiic connector | any I²C/Qwiic device |
 | [`06-web-dashboard`](apps/06-web-dashboard) | the `web_ui` brick, live telemetry at `http://<board-ip>:7000` | none |
 | [`07-camera-objects`](apps/07-camera-objects) | camera + on-device object detection | USB camera |
+| [`08-llm-bench`](apps/08-llm-bench) | local LLM speed (load, TTFT, tok/s) on the QRB2210 | model download (GUI) |
 
 Plus [`tests/run_checks.py`](tests/run_checks.py) — 19 stdlib-only checks you
 run **on the board** to assert the OS-level things (router service, serial

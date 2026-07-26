@@ -1,0 +1,6 @@
+name: 08 LLM Bench
+icon: ⏱️
+description: Benchmarks a local LLM running on the QRB2210 - model load time, time-to-first-token, and tokens/sec - so you know what on-device inference actually costs before designing an app around it. No sketch, no wiring.
+
+bricks:
+  - arduino:llm

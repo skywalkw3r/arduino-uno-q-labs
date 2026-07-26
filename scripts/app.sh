@@ -167,6 +167,16 @@ case "${CMD}" in
         echo "stopping $(dirname "$(dirname "${compose_file}")")"
         docker compose -f "${compose_file}" down 2>&1 | sed 's/^/  /'
       done
+
+    # Fallback: an app's sidecar (e.g. the llamacpp-models-runner) can outlive
+    # its compose file once the app shuts down, so `docker compose down` above
+    # can't find it. Sweep up anything still running that belongs to an app.
+    strays="$(docker ps -q --filter 'label=com.docker.compose.project')"
+    if [[ -n "${strays}" ]]; then
+      echo "removing $(echo "${strays}" | wc -l | tr -d ' ') straggler container(s)"
+      docker rm -f ${strays} >/dev/null 2>&1
+    fi
+
     remaining="$(docker ps -q | wc -l | tr -d ' ')"
     echo "done — ${remaining} container(s) still running"
     ;;
