@@ -84,7 +84,6 @@ const settingsPanel = document.querySelector('#settings');
 const notionStatus = document.querySelector('#notion-status');
 const syncToggle = document.querySelector('#sync-toggle');
 const syncInterval = document.querySelector('#sync-interval');
-const syncType = document.querySelector('#sync-type');
 const syncNowBtn = document.querySelector('#sync-now-btn');
 const syncStatus = document.querySelector('#sync-status');
 const enrichToggle = document.querySelector('#enrich-toggle');
@@ -113,7 +112,6 @@ function renderSettings(s) {
   }
   syncToggle.checked = !!s.enabled;
   syncInterval.value = String(s.interval);
-  syncType.value = s.item_type || 'note';
   const bits = [];
   if (s.pending != null) bits.push(`${s.pending} unsynced`);
   if (s.last_sync) bits.push(`last ${new Date(s.last_sync).toLocaleTimeString()}`);
@@ -129,13 +127,11 @@ function pushSettings() {
   ui.send_message('set_settings', {
     enabled: syncToggle.checked,
     interval: parseInt(syncInterval.value, 10),
-    item_type: syncType.value,
     enrich_enabled: enrichToggle.checked,
   });
 }
 syncToggle.addEventListener('change', pushSettings);
 syncInterval.addEventListener('change', pushSettings);
-syncType.addEventListener('change', pushSettings);
 enrichToggle.addEventListener('change', pushSettings);
 syncNowBtn.addEventListener('click', () => ui.send_message('sync_now'));
 

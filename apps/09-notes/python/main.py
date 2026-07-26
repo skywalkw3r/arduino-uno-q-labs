@@ -171,13 +171,12 @@ def notion_title_property() -> str:
     return "Name"  # Notion's default title property name
 
 
-def notion_create_page(title: str, body: str, prefix: str = "") -> tuple[bool, dict]:
+def notion_create_page(title: str, body: str) -> tuple[bool, dict]:
     prop = notion_title_property()
-    full_title = f"{prefix} {title}".strip() if prefix else title
     payload = {
         "parent": {"database_id": NOTION.get("database"), "type": "database_id"},
         # Only the title property is set, so this works with ANY database schema.
-        "properties": {prop: {"title": [{"text": {"content": full_title[:1900]}}]}},
+        "properties": {prop: {"title": [{"text": {"content": title[:1900]}}]}},
         "children": [{
             "object": "block",
             "type": "paragraph",
@@ -275,7 +274,6 @@ def all_notes(limit: int = 100) -> list[dict]:
 # set_settings() keeps these and the persisted values in step.
 _sync_enabled = get_setting("sync_enabled", "0") == "1"
 _sync_interval = int(get_setting("sync_interval", "10") or 10)
-_item_type = get_setting("item_type", "note")  # "note" or "reminder"
 # External place lookups are OFF by default — they send a query off-device.
 _enrich_enabled = get_setting("enrich_enabled", "0") == "1"
 
@@ -294,7 +292,6 @@ def sync_settings() -> dict:
         "enabled": _sync_enabled,
         "interval": _sync_interval,
         "intervals": SYNC_INTERVALS,
-        "item_type": _item_type,
         "pending": pending_note_count(),
         "last_sync": get_setting("last_sync", ""),
         "last_result": get_setting("last_result", ""),
@@ -316,14 +313,13 @@ def sync_to_notion(reason: str = "scheduled") -> dict:
     except Exception as exc:
         return {"ok": False, "msg": f"read failed: {exc}"}
 
-    prefix = "⏰" if _item_type == "reminder" else "📝"
     synced, err = 0, ""
     for r in rows:
         raw = (r.get("raw") or "").strip()
         ai = (r.get("ai") or "").strip()
         title = raw.splitlines()[0][:120] if raw else "Note"
         body = raw + (f"\n\n— AI —\n{ai}" if ai and not ai.startswith("(no AI") else "")
-        ok, data = notion_create_page(title, body, prefix)
+        ok, data = notion_create_page(title, body)
         if ok:
             db.execute_sql("UPDATE notes SET synced=1 WHERE id=?", (r["id"],))
             synced += 1
@@ -613,7 +609,7 @@ def on_get_settings(sid: str, data) -> None:
 
 
 def on_set_settings(sid: str, data) -> None:
-    global _sync_enabled, _sync_interval, _item_type, _enrich_enabled
+    global _sync_enabled, _sync_interval, _enrich_enabled
     if not _guard(sid):
         return
     data = data or {}
@@ -628,9 +624,6 @@ def on_set_settings(sid: str, data) -> None:
                 set_setting("sync_interval", iv)
         except (ValueError, TypeError):
             pass
-    if data.get("item_type") in ("note", "reminder"):
-        _item_type = data["item_type"]
-        set_setting("item_type", _item_type)
     if "enrich_enabled" in data:
         _enrich_enabled = bool(data["enrich_enabled"])
         set_setting("enrich_enabled", "1" if _enrich_enabled else "0")

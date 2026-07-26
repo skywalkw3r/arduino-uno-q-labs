@@ -94,11 +94,11 @@ The **database id** is the 32-hex string in the database URL *before* `?v=`
 wrapping page can have different ids — use the one with `?v=`.
 
 Restart the app, then open the **⚙ settings** menu: toggle sync on, pick an
-interval (5/10/30/60 min), choose **Note** or **Reminder** (sets the title
-prefix), and **Sync now** for an immediate push. Each note becomes a page in
-your database — only the **title property** is set, so it works with *any*
-database schema (the app auto-detects the title property's name). A ✓ Notion
-badge marks synced notes; editing a note re-syncs it.
+interval (5/10/30/60 min), and **Sync now** for an immediate push. Each note
+becomes a page in your database, titled with the note's first line — only the
+**title property** is set, so it works with *any* database schema (the app
+auto-detects the title property's name). A ✓ Notion badge marks synced notes;
+editing a note re-syncs it.
 
 ## Context detection & place lookups
 
