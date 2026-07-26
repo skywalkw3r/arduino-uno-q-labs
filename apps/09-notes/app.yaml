@@ -1,0 +1,8 @@
+name: 09 Notes
+icon: 📝
+description: Local AI note-taking. Type a note in the browser; a local LLM on the QRB2210 summarises it and pulls out action items; everything is stored in SQLite on the board. No cloud, no API key. Works as a plain note-taker until you download a model.
+
+bricks:
+  - arduino:web_ui
+  - arduino:llm
+  - arduino:dbstorage_sqlstore

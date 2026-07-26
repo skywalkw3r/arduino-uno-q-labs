@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UNO Q — Notes</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Notes</h1>
+        <span id="status" class="status status--down">connecting…</span>
+      </header>
+
+      <div id="banner" class="banner" hidden></div>
+
+      <section class="composer">
+        <textarea
+          id="note-input"
+          rows="4"
+          placeholder="Write a note… (⌘/Ctrl+Enter to save)"
+          aria-label="New note"
+        ></textarea>
+        <div class="composer__row">
+          <span class="hint">Runs a local model on the board — no cloud.</span>
+          <button id="save-btn" type="button">Save note</button>
+        </div>
+      </section>
+
+      <section>
+        <ul id="notes" class="notes"></ul>
+        <p id="empty" class="empty">No notes yet. Write your first one above.</p>
+      </section>
+
+      <footer>
+        <p>Stored on the board in SQLite · summarised on the QRB2210 · nothing leaves the device.</p>
+      </footer>
+    </main>
+
+    <script src="libs/socket.io.min.js"></script>
+    <script src="libs/arduino.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
