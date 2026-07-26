@@ -214,6 +214,11 @@ def on_disconnect(sid: str) -> None:
 
 def on_auth(sid: str, data) -> None:
     if PASSWORD is None:
+        # Open mode: no password needed. If a stale login page (left over from
+        # when a password WAS set) submits anyway, let it through so it recovers
+        # instead of hanging with no response.
+        ui.send_message("auth_ok", {}, room=sid)
+        pushes.put(sid)
         return
     given = str((data or {}).get("password", ""))
     # Constant-time compare so a wrong password can't be narrowed down by timing.

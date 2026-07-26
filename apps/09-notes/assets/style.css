@@ -30,6 +30,13 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute must win even over class rules that set `display`
+   (e.g. .login sets display:flex). Without this, hidden elements like the login
+   overlay stay visible because an author class beats the UA [hidden] rule. */
+[hidden] {
+  display: none !important;
+}
+
 .login {
   position: fixed;
   inset: 0;
