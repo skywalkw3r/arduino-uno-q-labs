@@ -7,7 +7,23 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <main>
+    <div id="login" class="login" hidden>
+      <form id="login-form" class="login__card">
+        <h2>Notes</h2>
+        <p>This board is password protected.</p>
+        <input
+          id="login-password"
+          type="password"
+          placeholder="Password"
+          autocomplete="current-password"
+          aria-label="Password"
+        />
+        <button type="submit">Unlock</button>
+        <span id="login-error" class="login__error" hidden>Wrong password.</span>
+      </form>
+    </div>
+
+    <main id="app" hidden>
       <header>
         <h1>Notes</h1>
         <span id="status" class="status status--down">connecting…</span>
@@ -39,7 +55,7 @@
     </main>
 
     <script src="libs/socket.io.min.js"></script>
-    <script src="libs/arduino.js"></script>
+    <script src="webui.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

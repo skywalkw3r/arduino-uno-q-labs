@@ -34,17 +34,51 @@ it and shows a banner. Summaries switch on automatically once a model is present
 ./scripts/app.sh start apps/09-notes
 ```
 
-Open **http://<board-ip>:7000**. Write a note, press **Save** (or ⌘/Ctrl+Enter).
-It appears immediately; the AI summary fills in a few seconds later once the
-model finishes.
+Open **https://<board-ip>:7000** (note **https** — see below). Write a note,
+press **Save** (or ⌘/Ctrl+Enter). It appears immediately; the AI summary fills
+in a few seconds later once the model finishes. Edit/Delete buttons sit on each
+saved note (editing re-summarises).
+
+## Security: HTTPS + optional password
+
+Both are controlled at the top of `python/main.py`.
+
+**HTTPS is on by default** (`USE_TLS = True`). The `web_ui` brick generates a
+self-signed certificate on first run, so your browser shows a one-time
+"connection not private" warning — accept it to proceed. To use your own
+certificate, drop `cert.pem` and `key.pem` in a `cert/` folder in the app. Set
+`USE_TLS = False` for plain http.
+
+**Password is opt-in.** Create a one-line file `secret.txt` next to the app (or
+set the `NOTES_PASSWORD` env var):
+
+```bash
+printf 'your-password' > apps/09-notes/secret.txt   # gitignored, never committed
+./scripts/app.sh stop apps/09-notes && ./scripts/app.sh start apps/09-notes
+```
+
+With no `secret.txt`, the app is **open** — anyone on your network can read and
+edit notes. With one, the browser shows a login and the server sends **no note
+data** until the session authenticates.
+
+How the gate works: the static page is public (it holds no secrets), but every
+note payload and every add/edit/delete is refused unless that socket session has
+sent the right password. The check is constant-time, and with HTTPS on the
+password is encrypted in transit. Honest scope: this is one shared password in
+plaintext on the board — enough to keep unauthorized people on your LAN out of
+your notes, **not** per-user accounts or hardened multi-tenant auth.
 
 ## How it works
 
 - **`web_ui`** serves the page and carries messages over a WebSocket. The
-  browser sends `new_note`; the server pushes the full `notes` list back after
-  every save so all connected browsers stay in sync.
+  browser sends `new_note` / `edit_note` / `delete_note`; the server pushes the
+  `notes` list back to authenticated sessions after every change.
 - **`llm`** runs `llm.chat(note)` locally to produce the summary + tasks.
-- **`dbstorage_sqlstore`** persists every note to `notes.db` on the board.
+- **`dbstorage_sqlstore`** persists notes to `notes.db`; edit/delete use its
+  `update()` / `delete()` methods.
+- **`webui.js`** is a tiny local wrapper (not the vendored `arduino.js`) that
+  connects socket.io to the page's own origin, so it works over both http and
+  https.
 
 ### The threading rule
 

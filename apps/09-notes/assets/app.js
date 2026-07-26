@@ -5,6 +5,12 @@
 
 const ui = new WebUI();
 
+const appEl = document.querySelector('#app');
+const loginEl = document.querySelector('#login');
+const loginForm = document.querySelector('#login-form');
+const loginPassword = document.querySelector('#login-password');
+const loginError = document.querySelector('#login-error');
+
 const statusEl = document.querySelector('#status');
 const bannerEl = document.querySelector('#banner');
 const inputEl = document.querySelector('#note-input');
@@ -15,10 +21,58 @@ const emptyEl = document.querySelector('#empty');
 ui.on_connect(() => setStatus('connected', true));
 ui.on_disconnect(() => setStatus('disconnected', false));
 
-// The server pushes the full list on connect and after every add/edit/delete,
+// --- auth ----------------------------------------------------------------
+// The static page is public, but the server sends no note data until the
+// session authenticates. The password is kept in sessionStorage so a refresh
+// re-auths silently and is forgotten when the tab closes.
+
+ui.on_message('need_auth', () => {
+  const saved = sessionStorage.getItem('notes_pw');
+  if (saved) {
+    ui.send_message('auth', { password: saved }); // try the remembered password
+  } else {
+    showLogin();
+  }
+});
+
+ui.on_message('auth_ok', () => {
+  loginError.hidden = true;
+  showApp();
+});
+
+ui.on_message('auth_fail', () => {
+  sessionStorage.removeItem('notes_pw');
+  loginError.hidden = false;
+  showLogin();
+});
+
+loginForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const pw = loginPassword.value;
+  if (!pw) return;
+  sessionStorage.setItem('notes_pw', pw);
+  loginError.hidden = true;
+  ui.send_message('auth', { password: pw });
+});
+
+function showLogin() {
+  appEl.hidden = true;
+  loginEl.hidden = false;
+  loginPassword.focus();
+}
+
+function showApp() {
+  loginEl.hidden = true;
+  appEl.hidden = false;
+}
+
+// --- notes ---------------------------------------------------------------
+// The server pushes the full list after auth and after every add/edit/delete,
 // so the UI is always a straight reflection of what's stored on the board.
+// Receiving a list also means we're authorised (or the app is open).
 let lastNotes = [];
 ui.on_message('notes', (data) => {
+  showApp();
   renderBanner(data.ai_available);
   lastNotes = data.notes || [];
   renderNotes(lastNotes);

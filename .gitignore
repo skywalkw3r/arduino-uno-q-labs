@@ -19,5 +19,11 @@ build/
 reports/
 *.log
 
+# Per-app secrets (e.g. the notes app password) — never commit
+secret.txt
+apps/*/secret.txt
+cert/
+*.pem
+
 # macOS
 .DS_Store

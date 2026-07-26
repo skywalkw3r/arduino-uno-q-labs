@@ -21,11 +21,13 @@ in loop() on the main thread. One owner for the DB and the model means no locks
 and no races — the same flag/queue pattern the bring-up apps use for the Bridge.
 """
 
+import hmac
 import logging
+import os
 import queue
-import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 from arduino.app_utils import App, Logger
 from arduino.app_bricks.web_ui import WebUI
@@ -53,6 +55,38 @@ NO_MODEL_PLACEHOLDER = (
     "(no AI summary yet — download a model in the llm brick's 'AI model' tab, "
     "then new notes will be summarised automatically)"
 )
+
+# --- security config ------------------------------------------------------
+#
+# HTTPS: on by default. The web_ui brick generates a self-signed certificate on
+# first run, so your browser shows a one-time "not private" warning you accept.
+# Drop your own cert.pem/key.pem in a `cert/` folder to replace it. Set False
+# for plain http.
+USE_TLS = True
+
+# Password: create a file `secret.txt` next to this app (one line, your
+# password) or set the NOTES_PASSWORD env var to require a login. If neither
+# exists the app is OPEN — anyone on the network can read and edit notes.
+# The file is gitignored, so your password is never committed.
+#
+# Security level: this keeps unauthorized people on your LAN out of your notes.
+# It's a single shared password, stored in plaintext on the board, compared in
+# constant time and — with TLS on — encrypted in transit. It is not per-user
+# accounts or hardened multi-tenant auth.
+
+
+def _load_password() -> str | None:
+    env = os.environ.get("NOTES_PASSWORD")
+    if env and env.strip():
+        return env.strip()
+    try:
+        pw = (Path(__file__).resolve().parent.parent / "secret.txt").read_text().strip()
+        return pw or None
+    except OSError:
+        return None
+
+
+PASSWORD = _load_password()
 
 # --------------------------------------------------------------- storage ---
 
@@ -136,49 +170,111 @@ def summarise(raw: str) -> tuple[str, bool]:
 
 # --------------------------------------------------------------- web UI ---
 
-ui = WebUI()
+ui = WebUI(use_tls=USE_TLS)
 
 # Operations from the browser, processed one at a time in loop(). Each is a dict:
 #   {"op": "add",    "text": "..."}
 #   {"op": "edit",   "id": N, "text": "..."}
 #   {"op": "delete", "id": N}
-# Handlers only enqueue; loop() is the sole owner of the DB and the model.
+# Handlers run on a socket thread and only enqueue; loop() is the sole owner of
+# the DB and the model, and the only place that reads the DB.
 pending: "queue.Queue[dict]" = queue.Queue()
-refresh = threading.Event()   # a client connected and wants the current list
+pushes: "queue.Queue[str]" = queue.Queue()   # sids to send the current list to
+
+# Per-session auth, keyed by socket session id (sid). A client is authed once it
+# sends the right password; with no password configured the app is open and
+# every session is treated as authed.
+authed: "set[str]" = set()
 
 
-def on_connect(connection) -> None:
-    # Don't touch the DB from this socket-thread callback; ask loop() to.
-    refresh.set()
+def is_authed(sid: str) -> bool:
+    return PASSWORD is None or sid in authed
 
 
-def on_new_note(client, data) -> None:
+def _guard(sid: str) -> bool:
+    """True if the client may act; otherwise nudge it back to the login."""
+    if is_authed(sid):
+        return True
+    ui.send_message("need_auth", {}, room=sid)
+    return False
+
+
+def on_connect(sid: str) -> None:
+    # These callbacks fire on a socket thread — no DB access here. Sending small
+    # control messages is fine; the notes list is fetched in loop() via `pushes`.
+    if PASSWORD is None:
+        pushes.put(sid)                              # open: send the list
+    else:
+        ui.send_message("need_auth", {}, room=sid)   # locked: ask for a password
+
+
+def on_disconnect(sid: str) -> None:
+    authed.discard(sid)
+
+
+def on_auth(sid: str, data) -> None:
+    if PASSWORD is None:
+        return
+    given = str((data or {}).get("password", ""))
+    # Constant-time compare so a wrong password can't be narrowed down by timing.
+    if hmac.compare_digest(given, PASSWORD):
+        authed.add(sid)
+        ui.send_message("auth_ok", {}, room=sid)
+        pushes.put(sid)
+    else:
+        ui.send_message("auth_fail", {}, room=sid)
+
+
+def on_new_note(sid: str, data) -> None:
+    if not _guard(sid):
+        return
     text = (data or {}).get("text", "").strip()
     if text:
         pending.put({"op": "add", "text": text})
 
 
-def on_edit_note(client, data) -> None:
+def on_edit_note(sid: str, data) -> None:
+    if not _guard(sid):
+        return
     data = data or {}
     note_id, text = data.get("id"), (data.get("text") or "").strip()
     if note_id is not None and text:
         pending.put({"op": "edit", "id": note_id, "text": text})
 
 
-def on_delete_note(client, data) -> None:
+def on_delete_note(sid: str, data) -> None:
+    if not _guard(sid):
+        return
     note_id = (data or {}).get("id")
     if note_id is not None:
         pending.put({"op": "delete", "id": note_id})
 
 
 ui.on_connect(on_connect)
+ui.on_disconnect(on_disconnect)
+ui.on_message("auth", on_auth)
 ui.on_message("new_note", on_new_note)
 ui.on_message("edit_note", on_edit_note)
 ui.on_message("delete_note", on_delete_note)
 
 
-def push_notes() -> None:
-    ui.send_message("notes", {"notes": all_notes(), "ai_available": llm is not None})
+def _payload() -> dict:
+    return {"notes": all_notes(), "ai_available": llm is not None}
+
+
+def push_to(sid: str) -> None:
+    ui.send_message("notes", _payload(), room=sid)
+
+
+def broadcast_notes() -> None:
+    # Note data goes only to authenticated sessions (or everyone when open) — an
+    # unauthenticated socket never receives notes, even though it can load the
+    # static page.
+    if PASSWORD is None:
+        ui.send_message("notes", _payload())
+    else:
+        for sid in list(authed):
+            ui.send_message("notes", _payload(), room=sid)
 
 
 # ---------------------------------------------------------------- operations ---
@@ -224,17 +320,23 @@ OPS = {
 # --------------------------------------------------------------- main loop ---
 
 def loop() -> None:
-    # 1. A newly connected browser asked for the current list.
-    if refresh.is_set():
-        refresh.clear()
-        push_notes()
+    # 1. Send the current list to any sessions that just connected or authed.
+    sent_any = False
+    while True:
+        try:
+            sid = pushes.get_nowait()
+        except queue.Empty:
+            break
+        push_to(sid)
+        sent_any = True
 
-    # 2. Process one queued operation. One-at-a-time keeps the DB single-owner
-    #    and lets the UI update per-op rather than in a batch.
+    # 2. Process one queued operation, then sync every authed session. One op at
+    #    a time keeps the DB single-owner and lets the UI update per-op.
     try:
         op = pending.get_nowait()
     except queue.Empty:
-        time.sleep(0.1)  # idle — don't spin a core
+        if not sent_any:
+            time.sleep(0.1)  # idle — don't spin a core
         return
 
     handler = OPS.get(op.get("op"))
@@ -247,8 +349,13 @@ def loop() -> None:
     except Exception as exc:
         logger.error("op %r failed: %s", op.get("op"), exc)
 
-    push_notes()  # keep every connected browser in sync
+    broadcast_notes()
 
 
-logger.info("Notes app starting — open http://<board-ip>:7000")
+scheme = "https" if USE_TLS else "http"
+logger.info(
+    "Notes app starting — open %s://<board-ip>:7000  (auth: %s)",
+    scheme,
+    "password required" if PASSWORD else "OPEN — no password set",
+)
 App.run(user_loop=loop)
