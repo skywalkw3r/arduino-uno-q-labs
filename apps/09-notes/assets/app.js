@@ -15,11 +15,13 @@ const emptyEl = document.querySelector('#empty');
 ui.on_connect(() => setStatus('connected', true));
 ui.on_disconnect(() => setStatus('disconnected', false));
 
-// The server pushes the full list on connect and after every save, so the UI
-// is always a straight reflection of what's stored on the board.
+// The server pushes the full list on connect and after every add/edit/delete,
+// so the UI is always a straight reflection of what's stored on the board.
+let lastNotes = [];
 ui.on_message('notes', (data) => {
   renderBanner(data.ai_available);
-  renderNotes(data.notes || []);
+  lastNotes = data.notes || [];
+  renderNotes(lastNotes);
 });
 
 saveBtn.addEventListener('click', save);
@@ -72,15 +74,8 @@ function noteCard(note) {
   const li = document.createElement('li');
   li.className = 'note' + (note.pending ? ' note--pending' : '');
 
-  const meta = document.createElement('div');
-  meta.className = 'note__meta';
-  meta.textContent = formatDate(note.created);
-  li.appendChild(meta);
-
-  const raw = document.createElement('div');
-  raw.className = 'note__raw';
-  raw.textContent = note.raw || '';
-  li.appendChild(raw);
+  li.appendChild(metaDiv(note.created));
+  li.appendChild(rawDiv(note.raw || ''));
 
   const aiText = (note.ai || '').trim();
   if (note.pending) {
@@ -88,7 +83,84 @@ function noteCard(note) {
   } else if (aiText) {
     li.appendChild(aiBlock(aiText, false));
   }
+
+  // Edit/Delete only on real, stored notes — an optimistic card has no id yet.
+  if (!note.pending && note.id != null) {
+    const actions = document.createElement('div');
+    actions.className = 'note__actions';
+    const edit = actionButton('Edit', () => enterEditMode(li, note));
+    const del = actionButton('Delete', () => deleteNote(note.id, li));
+    del.classList.add('btn-danger');
+    actions.append(edit, del);
+    li.appendChild(actions);
+  }
   return li;
+}
+
+function metaDiv(created) {
+  const el = document.createElement('div');
+  el.className = 'note__meta';
+  el.textContent = formatDate(created);
+  return el;
+}
+
+function rawDiv(text) {
+  const el = document.createElement('div');
+  el.className = 'note__raw';
+  el.textContent = text;
+  return el;
+}
+
+function actionButton(label, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn-small';
+  b.textContent = label;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function deleteNote(id, li) {
+  if (!confirm('Delete this note?')) return;
+  ui.send_message('delete_note', { id });
+  li.remove(); // optimistic; the server push re-syncs everyone
+  if (!listEl.children.length) emptyEl.hidden = false;
+}
+
+// Swap a note card into an editable textarea with Save / Cancel.
+function enterEditMode(li, note) {
+  li.className = 'note note--editing';
+  li.innerHTML = '';
+
+  const ta = document.createElement('textarea');
+  ta.className = 'note__edit';
+  ta.rows = 4;
+  ta.value = note.raw || '';
+  li.appendChild(ta);
+
+  const actions = document.createElement('div');
+  actions.className = 'note__actions';
+  const save = actionButton('Save', () => {
+    const text = ta.value.trim();
+    if (!text) return;
+    ui.send_message('edit_note', { id: note.id, text });
+    // Optimistic: show the new text + "re-summarising" until the server pushes
+    // back the authoritative row.
+    li.className = 'note';
+    li.innerHTML = '';
+    li.appendChild(metaDiv(note.created));
+    li.appendChild(rawDiv(text));
+    li.appendChild(aiBlock('re-summarising on the board…', true));
+  });
+  const cancel = actionButton('Cancel', () => renderNotes(lastNotes));
+  actions.append(save, cancel);
+  li.appendChild(actions);
+
+  ta.focus();
+  ta.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save.click();
+    if (e.key === 'Escape') cancel.click();
+  });
 }
 
 function aiBlock(text, pending) {

@@ -89,13 +89,11 @@ def row_to_dict(row) -> dict:
 
 def all_notes(limit: int = 100) -> list[dict]:
     try:
-        rows = db.read("notes") or []
+        rows = db.read("notes", order_by="id DESC", limit=limit) or []
     except Exception as exc:
         logger.warning("read failed: %s", exc)
         return []
-    notes = [row_to_dict(r) for r in rows]
-    notes.sort(key=lambda r: r.get("id") or 0, reverse=True)  # newest first
-    return notes[:limit]
+    return [row_to_dict(r) for r in rows]
 
 
 # ----------------------------------------------------------------- LLM ---
@@ -140,8 +138,13 @@ def summarise(raw: str) -> tuple[str, bool]:
 
 ui = WebUI()
 
-pending: "queue.Queue[str]" = queue.Queue()  # note texts from the browser
-refresh = threading.Event()                   # a client wants the current list
+# Operations from the browser, processed one at a time in loop(). Each is a dict:
+#   {"op": "add",    "text": "..."}
+#   {"op": "edit",   "id": N, "text": "..."}
+#   {"op": "delete", "id": N}
+# Handlers only enqueue; loop() is the sole owner of the DB and the model.
+pending: "queue.Queue[dict]" = queue.Queue()
+refresh = threading.Event()   # a client connected and wants the current list
 
 
 def on_connect(connection) -> None:
@@ -152,15 +155,70 @@ def on_connect(connection) -> None:
 def on_new_note(client, data) -> None:
     text = (data or {}).get("text", "").strip()
     if text:
-        pending.put(text)
+        pending.put({"op": "add", "text": text})
+
+
+def on_edit_note(client, data) -> None:
+    data = data or {}
+    note_id, text = data.get("id"), (data.get("text") or "").strip()
+    if note_id is not None and text:
+        pending.put({"op": "edit", "id": note_id, "text": text})
+
+
+def on_delete_note(client, data) -> None:
+    note_id = (data or {}).get("id")
+    if note_id is not None:
+        pending.put({"op": "delete", "id": note_id})
 
 
 ui.on_connect(on_connect)
 ui.on_message("new_note", on_new_note)
+ui.on_message("edit_note", on_edit_note)
+ui.on_message("delete_note", on_delete_note)
 
 
 def push_notes() -> None:
     ui.send_message("notes", {"notes": all_notes(), "ai_available": llm is not None})
+
+
+# ---------------------------------------------------------------- operations ---
+
+def do_add(text: str) -> None:
+    ai_text, ok = summarise(text)
+    db.store(
+        "notes",
+        {
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "raw": text,
+            "ai": ai_text if ok else NO_MODEL_PLACEHOLDER,
+        },
+    )
+    logger.info("added note (%d chars, ai=%s)", len(text), ok)
+
+
+def do_edit(note_id, text: str) -> None:
+    # Editing the text invalidates the old summary, so re-summarise.
+    ai_text, ok = summarise(text)
+    # int() makes the WHERE clause injection-proof: a non-integer id raises here
+    # rather than reaching the database.
+    db.update(
+        "notes",
+        {"raw": text, "ai": ai_text if ok else NO_MODEL_PLACEHOLDER},
+        f"id = {int(note_id)}",
+    )
+    logger.info("edited note id=%d (ai=%s)", int(note_id), ok)
+
+
+def do_delete(note_id) -> None:
+    db.delete("notes", f"id = {int(note_id)}")
+    logger.info("deleted note id=%d", int(note_id))
+
+
+OPS = {
+    "add": lambda o: do_add(o["text"]),
+    "edit": lambda o: do_edit(o["id"], o["text"]),
+    "delete": lambda o: do_delete(o["id"]),
+}
 
 
 # --------------------------------------------------------------- main loop ---
@@ -171,30 +229,23 @@ def loop() -> None:
         refresh.clear()
         push_notes()
 
-    # 2. Process one queued note per iteration (keeps sends interleaved so the
-    #    UI updates as each note finishes, rather than all at once).
+    # 2. Process one queued operation. One-at-a-time keeps the DB single-owner
+    #    and lets the UI update per-op rather than in a batch.
     try:
-        raw = pending.get_nowait()
+        op = pending.get_nowait()
     except queue.Empty:
         time.sleep(0.1)  # idle — don't spin a core
         return
 
-    ai_text, ok = summarise(raw)
-    if not ok:
-        ai_text = NO_MODEL_PLACEHOLDER
+    handler = OPS.get(op.get("op"))
+    if handler is None:
+        logger.warning("unknown op: %s", op)
+        return
 
     try:
-        db.store(
-            "notes",
-            {
-                "created": datetime.now().isoformat(timespec="seconds"),
-                "raw": raw,
-                "ai": ai_text,
-            },
-        )
-        logger.info("saved note (%d chars, ai=%s)", len(raw), ok)
+        handler(op)
     except Exception as exc:
-        logger.error("failed to store note: %s", exc)
+        logger.error("op %r failed: %s", op.get("op"), exc)
 
     push_notes()  # keep every connected browser in sync
 
