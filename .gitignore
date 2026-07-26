@@ -19,9 +19,11 @@ build/
 reports/
 *.log
 
-# Per-app secrets (e.g. the notes app password) — never commit
+# Per-app secrets (password, Notion token) — never commit
 secret.txt
 apps/*/secret.txt
+notion.txt
+apps/*/notion.txt
 cert/
 *.pem
 

@@ -26,10 +26,42 @@
     <main id="app" hidden>
       <header>
         <h1>Notes</h1>
-        <span id="status" class="status status--down">connecting…</span>
+        <div class="header-right">
+          <span id="status" class="status status--down">connecting…</span>
+          <button id="settings-btn" class="icon-btn" type="button" aria-label="Settings" title="Settings">⚙</button>
+        </div>
       </header>
 
       <div id="banner" class="banner" hidden></div>
+
+      <section id="settings" class="settings" hidden>
+        <h2>Notion sync</h2>
+        <p id="notion-status" class="settings__status"></p>
+        <label class="settings__row">
+          <span>Sync notes to Notion</span>
+          <input type="checkbox" id="sync-toggle" />
+        </label>
+        <label class="settings__row">
+          <span>Every</span>
+          <select id="sync-interval">
+            <option value="5">5 minutes</option>
+            <option value="10">10 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">60 minutes</option>
+          </select>
+        </label>
+        <label class="settings__row">
+          <span>Add each note as</span>
+          <select id="sync-type">
+            <option value="note">📝 Note</option>
+            <option value="reminder">⏰ Reminder</option>
+          </select>
+        </label>
+        <div class="settings__row settings__row--actions">
+          <button id="sync-now-btn" class="btn-small" type="button">Sync now</button>
+          <span id="sync-status" class="settings__meta"></span>
+        </div>
+      </section>
 
       <section class="composer">
         <textarea

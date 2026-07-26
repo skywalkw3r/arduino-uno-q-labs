@@ -68,6 +68,38 @@ password is encrypted in transit. Honest scope: this is one shared password in
 plaintext on the board — enough to keep unauthorized people on your LAN out of
 your notes, **not** per-user accounts or hardened multi-tenant auth.
 
+## Notion sync (optional)
+
+Push notes to a Notion database on a schedule. Off until you configure it.
+
+**The token alone grants no access.** Notion integrations start with access to
+nothing — you must *connect* each database to the integration, like sharing with
+a person. Two steps:
+
+1. **Create an integration** at [notion.so/my-integrations](https://www.notion.so/my-integrations)
+   → copy the Internal Integration Secret (`ntn_…`).
+2. **Connect it to your database**: open the database in Notion → **•••**
+   (top-right) → **Connections** → search your integration → confirm. *Without
+   this every API call returns `object_not_found`, even with a valid token.*
+
+Then create `apps/09-notes/notion.txt` (gitignored, never committed):
+
+```
+token=ntn_your_secret
+database=your_database_id
+```
+
+The **database id** is the 32-hex string in the database URL *before* `?v=`
+(the `?v=` part is a view, not the database). A full-page database and its
+wrapping page can have different ids — use the one with `?v=`.
+
+Restart the app, then open the **⚙ settings** menu: toggle sync on, pick an
+interval (5/10/30/60 min), choose **Note** or **Reminder** (sets the title
+prefix), and **Sync now** for an immediate push. Each note becomes a page in
+your database — only the **title property** is set, so it works with *any*
+database schema (the app auto-detects the title property's name). A ✓ Notion
+badge marks synced notes; editing a note re-syncs it.
+
 ## How it works
 
 - **`web_ui`** serves the page and carries messages over a WebSocket. The

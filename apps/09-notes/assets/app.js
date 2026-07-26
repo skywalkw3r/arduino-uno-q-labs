@@ -78,6 +78,57 @@ ui.on_message('notes', (data) => {
   renderNotes(lastNotes);
 });
 
+// --- settings (Notion sync) ----------------------------------------------
+const settingsBtn = document.querySelector('#settings-btn');
+const settingsPanel = document.querySelector('#settings');
+const notionStatus = document.querySelector('#notion-status');
+const syncToggle = document.querySelector('#sync-toggle');
+const syncInterval = document.querySelector('#sync-interval');
+const syncType = document.querySelector('#sync-type');
+const syncNowBtn = document.querySelector('#sync-now-btn');
+const syncStatus = document.querySelector('#sync-status');
+
+settingsBtn.addEventListener('click', () => {
+  const opening = settingsPanel.hidden;
+  settingsPanel.hidden = !opening;
+  if (opening) ui.send_message('get_settings'); // refresh on open
+});
+
+ui.on_message('settings', renderSettings);
+
+function renderSettings(s) {
+  if (s.notion_configured) {
+    notionStatus.textContent = 'Connected to Notion.';
+    notionStatus.className = 'settings__status settings__status--ok';
+    syncToggle.disabled = false;
+  } else {
+    notionStatus.textContent =
+      'Not configured — add a notion.txt on the board (see the app README).';
+    notionStatus.className = 'settings__status';
+    syncToggle.disabled = true;
+  }
+  syncToggle.checked = !!s.enabled;
+  syncInterval.value = String(s.interval);
+  syncType.value = s.item_type || 'note';
+  const bits = [];
+  if (s.pending != null) bits.push(`${s.pending} unsynced`);
+  if (s.last_sync) bits.push(`last ${new Date(s.last_sync).toLocaleTimeString()}`);
+  if (s.last_result) bits.push(s.last_result);
+  syncStatus.textContent = bits.join(' · ');
+}
+
+function pushSettings() {
+  ui.send_message('set_settings', {
+    enabled: syncToggle.checked,
+    interval: parseInt(syncInterval.value, 10),
+    item_type: syncType.value,
+  });
+}
+syncToggle.addEventListener('change', pushSettings);
+syncInterval.addEventListener('change', pushSettings);
+syncType.addEventListener('change', pushSettings);
+syncNowBtn.addEventListener('click', () => ui.send_message('sync_now'));
+
 saveBtn.addEventListener('click', save);
 inputEl.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save();
@@ -128,7 +179,14 @@ function noteCard(note) {
   const li = document.createElement('li');
   li.className = 'note' + (note.pending ? ' note--pending' : '');
 
-  li.appendChild(metaDiv(note.created));
+  const meta = metaDiv(note.created);
+  if (note.synced) {
+    const badge = document.createElement('span');
+    badge.className = 'note__synced';
+    badge.textContent = '✓ Notion';
+    meta.appendChild(badge);
+  }
+  li.appendChild(meta);
   li.appendChild(rawDiv(note.raw || ''));
 
   const aiText = (note.ai || '').trim();
